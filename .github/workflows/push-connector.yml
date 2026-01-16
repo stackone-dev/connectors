@@ -1,0 +1,91 @@
+name: Push Connector to StackOne
+
+on:
+  push:
+    branches:
+      - main
+      - '**'  # Allow all branches
+    paths:
+      - 'connectors/**/*.s1.yaml'
+  workflow_dispatch:
+    inputs:
+      connector_name:
+        description: 'Name of the connector'
+        required: true
+        type: string
+      stackone_api_key:
+        description: 'StackOne Project API Key to push the connector to'
+        required: true
+        type: string
+
+env:
+  STACKONE_API_KEY: ${{ github.event.inputs.stackone_api_key }}
+  CONNECTOR_NAME: ${{ github.event.inputs.connector_name }}
+
+jobs:
+  validate-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
+          fetch-depth: 0  # Fetch full history to detect changed files
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install StackOne CLI
+        run: |
+          npm install -g @stackone/cli
+
+      - name: Validate and push connectors
+        env:
+          STACKONE_API_KEY: ${{ env.STACKONE_API_KEY }}
+        run: |          
+          echo "Processing connector files..."
+          echo "CONNECTOR_NAME="${{ github.event.inputs.connector_name }}"
+            FILE_PATH = connectors/{CONNECTOR_NAME}/{CONNECTOR_NAME}.s1.yaml
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Processing: $FILE_PATH"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # Extract connector name from path ($FILE_PATH)
+            
+            # Validate YAML
+            echo "Validating $file..."
+            if stackone validate "$FILE_PATH"; then
+              echo "✅ Validation passed for $FILE_PATH"
+            else
+              echo "❌ Validation failed for $FILE_PATH"
+              exit 1
+            fi
+            
+            # Push to StackOne
+            echo "Pushing $FILE_PATH to StackOne project"
+            if stackone push --file "$FILE_PATH" --api-key "$STACKONE_API_KEY"; then
+              echo "✅ Successfully pushed $CONNECTOR_NAME to StackOne"
+            else
+              echo "❌ Failed to push $CONNECTOR_NAME to StackOne"
+              exit 1
+            fi
+          done
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "## ✅ Connector Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Processed Files:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.changed-files.outputs.files }}" | while read -r file; do
+            if [ -n "$FILE_PATH" ]; then
+              echo "- \`$FILE_PATH\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Connector**: ${{ env.STACKONE_CONNECTOR_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
